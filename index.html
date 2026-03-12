@@ -2423,7 +2423,10 @@ function aicAddTyping(){const m=document.getElementById('aicMessages');const d=d
 function aicRmTyping(){document.getElementById('aicTyping')?.remove();}
 function aicAddAI(text){aicRmTyping();const m=document.getElementById('aicMessages');const d=document.createElement('div');d.className='aic-bubble-ai';d.innerHTML=`<div class="aic-av">🕌</div><div class="aic-msg">${aicFmtMsg(text)}<span class="aic-time">${aicNow()}</span></div>`;m.appendChild(d);aicScroll();}
 function aicAddErr(msg){aicRmTyping();const m=document.getElementById('aicMessages');const d=document.createElement('div');d.className='aic-bubble-ai';d.innerHTML=`<div class="aic-av">🕌</div><div class="aic-msg" style="border-left:3px solid #ef4444;padding-left:10px">${msg}<span class="aic-time">${aicNow()}</span></div>`;m.appendChild(d);aicScroll();}
-const GROQ_KEYS = ['GROQ_API_KEY'];
+const GROQ_KEYS = [
+  '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',
+  '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'
+];
 let groqKeyIdx = 0;
 function groqNextKey(){ groqKeyIdx=(groqKeyIdx+1)%GROQ_KEYS.length; }
 
