@@ -3480,6 +3480,235 @@ function kalRenderEvents() {
   }
 
 }
+const ADHAN_EARLY_MIN = 5;
+ 
+function playAdhan(isEarly) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const seq = isEarly
+      ? [{f:440,d:.3},{f:440,d:.3},{f:523,d:.5}]
+      : [{f:330,d:.5},{f:392,d:.4},{f:440,d:.6},{f:494,d:.7},{f:440,d:.5},{f:392,d:.4},{f:330,d:.6},{f:294,d:.4},{f:330,d:.8}];
+    let t = ctx.currentTime + 0.1;
+    seq.forEach(({f, d}) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.frequency.value = f; o.type = 'sine';
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.55, t + 0.06);
+      g.gain.exponentialRampToValueAtTime(0.001, t + d - 0.04);
+      o.start(t); o.stop(t + d);
+      const o2 = ctx.createOscillator(), g2 = ctx.createGain();
+      o2.connect(g2); g2.connect(ctx.destination);
+      o2.frequency.value = f * 2; o2.type = 'triangle';
+      g2.gain.setValueAtTime(0, t);
+      g2.gain.linearRampToValueAtTime(0.12, t + 0.06);
+      g2.gain.exponentialRampToValueAtTime(0.001, t + d - 0.04);
+      o2.start(t); o2.stop(t + d);
+      t += d + 0.1;
+    });
+    setTimeout(() => { try { ctx.close(); } catch(e){} }, (t - ctx.currentTime + 0.8) * 1000);
+  } catch(e) { console.warn('Web Audio error:', e); }
+}
+ 
+async function reqNotifPermission() {
+  if (!('Notification' in window)) { showToast('⚠️ Browser tidak mendukung notifikasi'); return false; }
+  if (Notification.permission === 'granted') return true;
+  if (Notification.permission === 'denied') { showToast('🚫 Notifikasi diblokir — aktifkan di pengaturan browser'); return false; }
+  const perm = await Notification.requestPermission();
+  if (perm === 'granted') showToast('✅ Notifikasi browser diizinkan!');
+  return perm === 'granted';
+}
+ 
+function sendBrowserNotif(title, body, emoji) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    const svgIcon = `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>${emoji}</text></svg>`;
+    const n = new Notification(title, { body, icon: svgIcon, requireInteraction: true, silent: true });
+    n.onclick = () => { window.focus(); n.close(); };
+    setTimeout(() => n.close(), 30000);
+  } catch(e) {}
+}
+ 
+function showPrayerAlertNew(pk, city, isEarly) {
+  const ov = document.getElementById('prayerAlert'); if (!ov) return;
+  const icons = {imsak:'🌙',subuh:'🌅',dzuhur:'🕌',ashar:'☀️',maghrib:'🌇',isya:'🌙'};
+  const arabic = {imsak:'الإمساك',subuh:'صَلَاةُ الفَجْر',dzuhur:'صَلَاةُ الظُّهْر',ashar:'صَلَاةُ العَصْر',maghrib:'صَلَاةُ المَغْرِب',isya:'صَلَاةُ العِشَاء'};
+  const label = {imsak:'Imsak',subuh:'Subuh',dzuhur:'Dzuhur',ashar:'Ashar',maghrib:'Maghrib',isya:'Isya'};
+  const name = label[pk] || pk;
+  const ico  = icons[pk] || '🕌';
+  document.getElementById('paIcon').textContent  = ico;
+  document.getElementById('paLabel').textContent = isEarly ? `⏰ ${ADHAN_EARLY_MIN} Menit Lagi` : `Waktu ${name}`;
+  document.getElementById('paTitle').textContent = name;
+  document.getElementById('paCity').textContent  = city.charAt(0).toUpperCase() + city.slice(1);
+  const arEl = ov.querySelector('.pa-arabic');
+  if (arEl) arEl.textContent = arabic[pk] || 'اللَّهُ أَكْبَرُ';
+  const card = ov.querySelector('.prayer-alert-card');
+  if (card) card.style.background = isEarly
+    ? 'linear-gradient(160deg,#1c1800 0%,#2b2200 70%,#0f0c00 100%)'
+    : 'linear-gradient(160deg,#0a1f14 0%,#0d2b1c 70%,#071510 100%)';
+  ov.classList.add('show');
+  playAdhan(isEarly);
+  if (navigator.vibrate) navigator.vibrate(isEarly ? [300,200,300] : [600,300,600,300,800]);
+  sendBrowserNotif(
+    isEarly ? `⏰ ${ADHAN_EARLY_MIN} mnt lagi — ${name}` : `🕌 Waktu ${name} — ${city}`,
+    isEarly ? `Bersiaplah untuk Sholat ${name}` : arabic[pk] || '',
+    ico
+  );
+  if (window._paAutoClose) clearTimeout(window._paAutoClose);
+  window._paAutoClose = setTimeout(() => closePrayerAlert(), 25000);
+}
+ 
+window.showPrayerAlert = showPrayerAlertNew;
+ 
+function scheduleReminderEnhanced(city, pk) {
+  const timeStr = PDB[city]?.[pk]; if (!timeStr) return;
+  const [h, m] = timeStr.split(':').map(Number);
+  const now = new Date();
+  const target = new Date(); target.setHours(h, m, 0, 0);
+  if (target <= now) target.setDate(target.getDate() + 1);
+  const ms = target - now;
+  const key = city + '__' + pk;
+  if (!window.reminderTimeouts) window.reminderTimeouts = {};
+  const rt = window.reminderTimeouts;
+  if (rt[key])      { clearTimeout(rt[key]);      delete rt[key]; }
+  if (rt[key+'_e']) { clearTimeout(rt[key+'_e']); delete rt[key+'_e']; }
+  const earlyMs = ms - ADHAN_EARLY_MIN * 60000;
+  if (earlyMs > 0) {
+    rt[key + '_e'] = setTimeout(() => {
+      const c = document.getElementById('jCity')?.value || city;
+      showPrayerAlertNew(pk, c, true);
+      showToast('⏰ ' + ADHAN_EARLY_MIN + ' menit lagi: ' + (PL[pk]||pk));
+    }, earlyMs);
+  }
+  rt[key] = setTimeout(() => {
+    const c = document.getElementById('jCity')?.value || city;
+    showPrayerAlertNew(pk, c, false);
+    showToast('🕌 Waktu ' + (PL[pk]||pk) + ' telah tiba!');
+    scheduleReminderEnhanced(city, pk);
+  }, ms);
+}
+ 
+window.scheduleReminder = scheduleReminderEnhanced;
+ 
+function toggleReminderEnhanced(city, pk) {
+  const key = city + '__' + pk;
+  if (!window.reminders) window.reminders = lsGetJSON('prayer_reminders', {});
+  const wasOn = window.reminders[key] === true;
+  window.reminders[key] = !wasOn;
+  reminders = window.reminders;
+  lsSetJSON('prayer_reminders', window.reminders);
+  if (!wasOn) {
+    reqNotifPermission();
+    scheduleReminderEnhanced(city, pk);
+    showToast('🔔 Pengingat ' + (PL[pk]||pk) + ' aktif');
+  } else {
+    if (!window.reminderTimeouts) window.reminderTimeouts = {};
+    const rt = window.reminderTimeouts;
+    if (rt[key])      { clearTimeout(rt[key]);      delete rt[key]; }
+    if (rt[key+'_e']) { clearTimeout(rt[key+'_e']); delete rt[key+'_e']; }
+    showToast('🔕 Pengingat ' + (PL[pk]||pk) + ' dimatikan');
+  }
+  if (typeof renderJadwal === 'function') renderJadwal();
+  updateNotifInfo();
+}
+ 
+window.toggleReminder = toggleReminderEnhanced;
+ 
+function toggleAllReminders(city, activate) {
+  if (!window.reminders) window.reminders = lsGetJSON('prayer_reminders', {});
+  const prayers = Object.keys(PDB[city]||{});
+  prayers.forEach(pk => {
+    const key = city + '__' + pk;
+    window.reminders[key] = activate;
+    reminders = window.reminders;
+    if (activate) scheduleReminderEnhanced(city, pk);
+    else {
+      if (!window.reminderTimeouts) window.reminderTimeouts = {};
+      const rt = window.reminderTimeouts;
+      if (rt[key])      { clearTimeout(rt[key]);      delete rt[key]; }
+      if (rt[key+'_e']) { clearTimeout(rt[key+'_e']); delete rt[key+'_e']; }
+    }
+  });
+  lsSetJSON('prayer_reminders', window.reminders);
+  if (typeof renderJadwal === 'function') renderJadwal();
+  updateNotifInfo();
+  showToast(activate ? '🔔 Semua pengingat diaktifkan!' : '🔕 Semua pengingat dimatikan');
+}
+ 
+function updateNotifInfo() {
+  const city = document.getElementById('jCity')?.value || 'makassar';
+  const rem = window.reminders || {};
+  const active = Object.keys(PDB[city]||{}).filter(pk => rem[city+'__'+pk] === true);
+  const el = document.getElementById('reminderCount');
+  const ic = document.getElementById('reminderIcon');
+  if (el) el.textContent = active.length > 0
+    ? active.length + ' pengingat aktif: ' + active.map(pk=>PL[pk]||pk).join(', ')
+    : 'Belum ada pengingat — ketuk 🔔 pada kartu sholat untuk mengaktifkan';
+  if (ic) { ic.className = active.length > 0 ? 'fas fa-bell' : 'fas fa-bell-slash'; ic.style.color = active.length > 0 ? 'var(--p)' : 'var(--tl)'; }
+  const btnTxt = document.getElementById('toggleAllTxt');
+  if (btnTxt) {
+    const allOn = Object.keys(PDB[city]||{}).every(pk => rem[city+'__'+pk] === true);
+    btnTxt.textContent = allOn ? 'Matikan Semua' : 'Aktifkan Semua';
+    const btn = document.getElementById('toggleAllBtn');
+    if (btn) btn.style.background = allOn ? 'linear-gradient(135deg,#dc2626,#b91c1c)' : 'linear-gradient(135deg,var(--p),var(--pd))';
+  }
+}
+ 
+window.updateReminderInfo = updateNotifInfo;
+ 
+function rescheduleAllEnhanced() {
+  const rem = window.reminders || lsGetJSON('prayer_reminders', {});
+  window.reminders = rem; reminders = rem;
+  Object.keys(rem).forEach(k => {
+    if (rem[k]) {
+      const parts = k.split('__'); const city = parts[0]; const pk = parts[1];
+      if (PDB[city]?.[pk]) scheduleReminderEnhanced(city, pk);
+    }
+  });
+}
+ 
+window.rescheduleAll = rescheduleAllEnhanced;
+ 
+function previewAdhan() { playAdhan(false); showToast('🔊 Preview nada adzan…'); }
+ 
+function injectNotifUI() {
+  const jh = document.querySelector('#page-jadwal .jh');
+  if (jh && !document.getElementById('notifCtrlBar')) {
+    const bar = document.createElement('div');
+    bar.id = 'notifCtrlBar';
+    bar.style.cssText = 'display:flex;gap:7px;margin-bottom:11px;flex-wrap:wrap;position:relative;z-index:1';
+    bar.innerHTML = '<button onclick="reqNotifPermission().then(g=>{ if(g) showToast(\'✅ Notifikasi aktif!\'); updateNotifInfo(); })" style="flex:1;min-width:130px;padding:9px 10px;background:rgba(16,185,129,.18);border:1px solid rgba(16,185,129,.35);border-radius:11px;font-family:\'Nunito\',sans-serif;font-size:.72rem;font-weight:800;color:#6ee7b7;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px"><i class="fas fa-bell"></i> Izinkan Notif Browser</button><button onclick="previewAdhan()" style="flex:1;min-width:110px;padding:9px 10px;background:rgba(245,158,11,.18);border:1px solid rgba(245,158,11,.35);border-radius:11px;font-family:\'Nunito\',sans-serif;font-size:.72rem;font-weight:800;color:#fbbf24;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px"><i class="fas fa-volume-high"></i> Preview Suara</button>';
+    jh.insertBefore(bar, jh.firstChild);
+  }
+  const infoEl = document.querySelector('.reminder-info');
+  if (infoEl && !document.getElementById('toggleAllWrap')) {
+    const wrap = document.createElement('div');
+    wrap.id = 'toggleAllWrap';
+    wrap.style.cssText = 'padding:0 16px;margin-top:8px';
+    wrap.innerHTML = '<button id="toggleAllBtn" onclick="(function(){ const c=document.getElementById(\'jCity\')?.value||\'makassar\'; const rem=window.reminders||{}; const keys=Object.keys(PDB[c]||{}); const anyOn=keys.some(pk=>rem[c+\'__\'+pk]===true); toggleAllReminders(c,!anyOn); })()" style="width:100%;padding:10px;border:none;border-radius:11px;font-family:\'Nunito\',sans-serif;font-size:.8rem;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px;color:#fff;box-shadow:0 3px 12px rgba(16,185,129,.28);background:linear-gradient(135deg,var(--p),var(--pd))"><i class="fas fa-bell"></i> <span id="toggleAllTxt">Aktifkan Semua Pengingat</span></button>';
+    infoEl.after(wrap);
+  }
+}
+ 
+(function initPrayerNotifSystem() {
+  function run() {
+    window.reminderTimeouts = window.reminderTimeouts || reminderTimeouts || {};
+    window.reminders = window.reminders || lsGetJSON('prayer_reminders', {});
+    reminders = window.reminders;
+    injectNotifUI();
+    rescheduleAllEnhanced();
+    updateNotifInfo();
+    const hasActive = Object.values(window.reminders).some(Boolean);
+    if (hasActive && 'Notification' in window && Notification.permission === 'default') {
+      setTimeout(reqNotifPermission, 2500);
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(run, 700));
+  } else {
+    setTimeout(run, 700);
+  }
+})();
 
 function kalInit() {
   const now = new Date();
@@ -3494,6 +3723,7 @@ function kalInit() {
   // Auto select today
   kalSelectDay(now.getFullYear(), now.getMonth()+1, now.getDate());
 }
+
 
 </script> 
 
