@@ -2423,46 +2423,60 @@ function aicAddTyping(){const m=document.getElementById('aicMessages');const d=d
 function aicRmTyping(){document.getElementById('aicTyping')?.remove();}
 function aicAddAI(text){aicRmTyping();const m=document.getElementById('aicMessages');const d=document.createElement('div');d.className='aic-bubble-ai';d.innerHTML=`<div class="aic-av">🕌</div><div class="aic-msg">${aicFmtMsg(text)}<span class="aic-time">${aicNow()}</span></div>`;m.appendChild(d);aicScroll();}
 function aicAddErr(msg){aicRmTyping();const m=document.getElementById('aicMessages');const d=document.createElement('div');d.className='aic-bubble-ai';d.innerHTML=`<div class="aic-av">🕌</div><div class="aic-msg" style="border-left:3px solid #ef4444;padding-left:10px">${msg}<span class="aic-time">${aicNow()}</span></div>`;m.appendChild(d);aicScroll();}
-const GROQ_KEYS = [
-  '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',
-  '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'
-];
-let groqKeyIdx = 0;
-function groqNextKey(){ groqKeyIdx=(groqKeyIdx+1)%GROQ_KEYS.length; }
-
 async function aicSend(){
-  const inp=document.getElementById('aicInput');const btn=document.getElementById('aicSendBtn');
-  const text=inp.value.trim();if(!text||aicBusy)return;
-  aicAddUser(text);inp.value='';inp.style.height='auto';aicHist.push({role:'user',content:text});
-  aicBusy=true;btn.disabled=true;inp.disabled=true;aicAddTyping();
-  let lastErr='';
-  for(let attempt=0;attempt<GROQ_KEYS.length;attempt++){
-    try{
-      const res=await fetch('https://api.groq.com/openai/v1/chat/completions',{
-        method:'POST',
-        headers:{'Content-Type':'application/json','Authorization':'Bearer '+GROQ_KEYS[groqKeyIdx]},
-        body:JSON.stringify({model:'llama-3.1-8b-instant',max_tokens:1000,messages:[{role:'system',content:AIC_SYS},...aicHist]})
-      });
-      if(res.status===429){lastErr='Rate limit key '+(groqKeyIdx+1);groqNextKey();continue;}
-      if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e?.error?.message||'HTTP '+res.status);}
-      const data=await res.json();
-      const rep=data?.choices?.[0]?.message?.content||'Maaf, tidak ada respons.';
-      aicHist.push({role:'assistant',content:rep});aicAddAI(rep);
-      aicBusy=false;btn.disabled=false;inp.disabled=false;inp.focus();
-      return;
-    }catch(e){lastErr=e.message||'Gagal';groqNextKey();}
+  const inp = document.getElementById('aicInput');
+  const btn = document.getElementById('aicSendBtn');
+  const text = inp.value.trim();
+  if(!text || aicBusy) return;
+
+  aicAddUser(text);
+  inp.value = ''; inp.style.height = 'auto';
+  aicHist.push({role: 'user', content: text});
+  aicBusy = true; btn.disabled = true; inp.disabled = true;
+  document.getElementById('aicStatus').textContent = 'Sedang mengetik...';
+  aicAddTyping();
+
+  // ============================================================
+  // GROQ API — Ganti GROQ_API_KEY_KAMU dengan key asli kamu
+  // Daftar gratis: https://console.groq.com/keys
+  // ============================================================
+  const GROQ_KEY = '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'; // <-- GANTI INI
+
+  try { 
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + GROQ_KEY
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        max_tokens: 1000,
+        messages: [
+          {role: 'system', content: AIC_SYS},
+          ...aicHist
+        ]
+      })
+    });
+
+    if(!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData?.error?.message || 'HTTP ' + res.status);
+    }
+
+    const data = await res.json();
+    const rep = data?.choices?.[0]?.message?.content || 'Maaf, tidak ada respons.';
+    aicHist.push({role: 'assistant', content: rep});
+    aicAddAI(rep);
+
+  } catch(e) {
+    aicHist.pop();
+    aicAddErr('⚠ ' + (e.message || 'Gagal terhubung') + '. Coba lagi. 🙏');
+  } finally {
+    aicBusy = false; btn.disabled = false; inp.disabled = false;
+    document.getElementById('aicStatus').textContent = 'Online \u2014 siap membantu';
+    inp.focus();
   }
-  aicHist.pop();
-  aicAddErr('⚠️ '+lastErr+'. Coba lagi. 🙏');
-  aicBusy=false;btn.disabled=false;inp.disabled=false;inp.focus();
-}
-
-function aicSendChip(q){const inp=document.getElementById('aicInput');if(!inp)return;inp.value=q;aicSend();}
-
-function resetAicChat(){
-  aicHist=[];const m=document.getElementById('aicMessages');if(!m)return;
-  m.innerHTML=`<div class="aic-bubble-ai"><div class="aic-av">🕌</div><div class="aic-msg" style="background:linear-gradient(135deg,#0f2218,#0f1f17);border:1px solid rgba(16,185,129,.2)"><div style="font-size:.85rem;font-weight:900;color:var(--acc);margin-bottom:5px">Assalamu'alaikum Warahmatullahi Wabarakatuh 🌿</div><div style="font-size:.76rem;color:rgba(255,255,255,.75);line-height:1.6">Saya <strong style="color:#fff">Ustadz AI</strong>, asisten islami siap membantu.</div><div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:8px"><span style="font-size:.63rem;background:rgba(16,185,129,.15);color:var(--acc);padding:3px 8px;border-radius:20px;font-weight:700">📖 Al-Qur'an</span><span style="font-size:.63rem;background:rgba(16,185,129,.15);color:var(--acc);padding:3px 8px;border-radius:20px;font-weight:700">🕌 Fiqih</span><span style="font-size:.63rem;background:rgba(16,185,129,.15);color:var(--acc);padding:3px 8px;border-radius:20px;font-weight:700">🤲 Doa & Dzikir</span><span style="font-size:.63rem;background:rgba(16,185,129,.15);color:var(--acc);padding:3px 8px;border-radius:20px;font-weight:700">✨ Amalan</span></div></div></div>`;
-  showToast('🔄 Chat direset');
 }
 
 
